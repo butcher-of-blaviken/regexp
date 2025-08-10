@@ -1,9 +1,9 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+use std::rc::{Rc, Weak};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 enum Token {
+    // Program is a special token that represents the whole regex 'program'
+    Program,
     Literal(String),
     // Backslash is used to escape characters in regex
     // For example, \d for digit, \w for word character, etc.
@@ -26,6 +26,16 @@ enum Token {
     Dollar,
 }
 
+impl Token {
+    fn is_binary_operator(&self) -> bool {
+        matches!(self, Token::VBar | Token::Comma | Token::Dash)
+    }
+
+    fn is_unary_operator(&self) -> bool {
+        matches!(self, Token::KleeneStar | Token::KleenePlus | Token::Question | Token::Caret)
+    }
+}
+
 pub struct Regex {
     tokens: Vec<Token>,
 }
@@ -46,13 +56,148 @@ impl DFA {
     }
 }
 
-impl Regex {
-    fn parse(tokens: &Vec<Token>) -> Result<DFA, String> {
-        // Here you would typically parse the tokens into a finite automaton or similar structure
-        // For now, we just return an empty Graph instance
-        Ok(DFA::new())
+struct ASTNode {
+    parent: Option<Weak<Rc<ASTNode>>>,
+    children: Vec<Box<ASTNode>>,
+    op: Option<Token>,
+}
+
+impl ASTNode {
+    fn new(op: Option<Token>) -> Self {
+        ASTNode {
+            parent: None,
+            children: Vec::new(),
+            op,
+        }
     }
 
+    fn add_child(&mut self, child: ASTNode) {
+        self.children.push(Box::new(child));
+    }
+
+    fn pop_child(&mut self) -> Option<ASTNode> {
+        self.children.pop().map(|child| *child)
+    }
+}
+
+struct AST {
+    root: Option<ASTNode>,
+}
+
+impl AST {
+    fn new() -> Self {
+        AST {
+            root: None,
+        }
+    }
+
+    fn add_node(&mut self, node: ASTNode) {
+        match self.root {
+            Some(ref mut root) => root.add_child(node),
+            None => self.root = Some(node),
+        }
+    }
+
+    fn visualize(&self) -> String {
+        // Visualize the AST as a string with indentation
+        fn visualize_node(node: &ASTNode, depth: usize) -> String {
+            let indent = "  ".repeat(depth);
+            let mut result = String::new();
+            if let Some(ref op) = node.op {
+                result.push_str(&format!("{}{:?}\n", indent, op));
+            }
+            for child in &node.children {
+                result.push_str(&visualize_node(child, depth + 1));
+            }
+            result
+        }
+        if let Some(ref root) = self.root {
+            visualize_node(root, 0)
+        } else {
+            String::from("Empty AST")
+        }
+    }
+}
+
+struct Parser {
+    tokens: Vec<Token>,
+    current_token_idx: usize,
+    current_node: Option<ASTNode>,
+}
+
+impl Parser {
+    fn new(tokens: Vec<Token>) -> Self {
+        Parser {
+            tokens,
+            current_token_idx: 0,
+            current_node: None,
+        }
+    }
+
+    fn parse(&mut self) -> Result<(), String> {
+        self.current_node = Some(ASTNode::new(Some(Token::Program)));
+        while self.current_token_idx < self.tokens.len() {
+            match self.parse_next() {
+                Ok(_) => {},
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_next(&mut self) -> Result<(), String> {
+        match self.tokens.get(self.current_token_idx) {
+            Some(token) => {
+                match token {
+                    Token::Literal(_) => {
+                        self.parse_literal(token.clone())
+                    },
+                    Token::KleeneStar => {
+                        self.parse_kleene_star(token.clone())
+                    },
+                    _ => Err(format!("Unexpected token: {:?}", token)),
+                }
+            },
+            None => Err("No tokens to parse".into()),
+        }
+    }
+
+    fn parse_literal(&mut self, token: Token) -> Result<(), String> {
+        match token {
+            Token::Literal(_) => {
+                if let Some(ref mut node) = self.current_node {
+                    node.add_child(ASTNode::new(Some(token.clone())));
+                }
+                self.current_token_idx += 1;
+                Ok(())
+            },
+            _ => Err(format!("Expected a literal, found: {:?}", token)),
+        }
+    }
+
+    fn parse_kleene_star(&mut self, token: Token) -> Result<(), String> {
+        match token {
+            Token::KleeneStar => {
+                // Kleene star nodes are unary operators and will be applied
+                // to the previous node in the AST.
+                match self.current_node {
+                    None => return Err("No current node to apply Kleene star to".into()),
+                    Some(ref mut node) => {
+                        let child = node.pop_child().ok_or("No child to apply Kleene star to")?;
+                        let mut kleene_node = ASTNode::new(Some(Token::KleeneStar));
+                        kleene_node.add_child(child);
+                        node.add_child(kleene_node);
+                        self.current_token_idx += 1;
+                        Ok(())
+                    },
+                }
+            },
+            _ => Err(format!("Expected Kleene star, found: {:?}", token)),
+        }
+    }
+}
+
+impl Regex {
     fn lex(expression: &str) -> Result<Vec<Token>, String> {
         let mut tokens = Vec::new();
 
@@ -97,7 +242,9 @@ impl Regex {
                     }
                     tokens.push(Token::Literal(literal));
                 }
-                _ => {}
+                _ => {
+                    return Err(format!("Unexpected character: '{}'", c));
+                }
             }
         }
 
@@ -124,12 +271,6 @@ impl Regex {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
 
     #[test]
     fn regex_lex() {
@@ -186,9 +327,33 @@ mod tests {
     }
 
     #[test]
+    fn regex_lex_unsupported_character() {
+        // '@' should be escaped
+        let result = Regex::lex("a*b@");
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), "Unexpected character: '@'");
+    }
+
+    #[test]
     fn regex_new() {
         let regex = Regex::new("a*b").unwrap();
         assert!(regex.is_match("aaab"));
         assert!(!regex.is_match("b"));
+    }
+
+    #[test]
+    fn regex_parse() {
+        let tokens = Regex::lex("a*b").unwrap();
+        let mut parser = Parser::new(tokens);
+        assert!(parser.parse().is_ok());
+        if let Some(ast) = parser.current_node {
+            assert_eq!(ast.op, Some(Token::Program));
+            assert_eq!(ast.children.len(), 2);
+            if let Some(child) = ast.children.first() {
+                assert_eq!(child.op, Some(Token::KleeneStar));
+            }
+        } else {
+            panic!("Expected a non-empty AST");
+        }
     }
 }
