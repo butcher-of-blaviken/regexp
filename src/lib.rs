@@ -13,9 +13,7 @@ impl Regex {
         let tokens = lexer::lex(expression)?;
         // Here you would typically compile the regex expression
         // For now, we just return an empty Regex instance
-        Ok(Regex{
-            tokens,
-        })
+        Ok(Regex { tokens })
     }
 
     pub fn is_match(&self, _text: &str) -> bool {

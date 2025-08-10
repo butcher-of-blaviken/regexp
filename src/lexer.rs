@@ -1,10 +1,8 @@
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
-    // Program is a special token that represents the whole regex 'program'
-    Program,
     Literal(String),
-    // Backslash is used to escape characters in regex
-    // For example, \d for digit, \w for word character, etc.
+    /// Backslash is used to escape characters in regex.
+    /// For example, \d for digit, \w for word character, etc.
     Backslash(char),
     KleeneStar,
     KleenePlus,
@@ -18,14 +16,14 @@ pub enum Token {
     RBrace,
     Comma,
 
-    // Dash is used in character classes, e.g., [a-z]
-    // or sometimes as a literal character.
-    // If it appears at the start or end of a character class, it is treated as a literal dash.
-    // For example, [a-z-] matches any lowercase letter or a dash.
-    // If it appears between two characters, it is treated as a range.
-    // For example, [a-z] matches any lowercase letter from "a" to "z".
-    // If it appears at the start of a character class, it is treated as a literal dash.
-    // For example, [-abc] matches a dash, "a", "b", or "c".
+    /// Dash is used in character classes, e.g., [a-z]
+    /// or sometimes as a literal character.
+    /// If it appears at the start or end of a character class, it is treated as a literal dash.
+    /// For example, [a-z-] matches any lowercase letter or a dash.
+    /// If it appears between two characters, it is treated as a range.
+    /// For example, [a-z] matches any lowercase letter from "a" to "z".
+    /// If it appears at the start of a character class, it is treated as a literal dash.
+    /// For example, [-abc] matches a dash, "a", "b", or "c".
     Dash,
     Dot,
     Caret,
@@ -38,7 +36,10 @@ impl Token {
     }
 
     pub fn is_unary_postfix(&self) -> bool {
-        matches!(self, Token::KleeneStar | Token::KleenePlus | Token::Question)
+        matches!(
+            self,
+            Token::KleeneStar | Token::KleenePlus | Token::Question
+        )
     }
 
     pub fn is_unary_prefix(&self) -> bool {
@@ -74,11 +75,9 @@ pub fn lex(expression: &str) -> Result<Vec<Token>, String> {
             '^' => tokens.push(Token::Caret),
             '$' => tokens.push(Token::Dollar),
             '-' => tokens.push(Token::Dash),
-            '\\' => {
-                match iter.next() {
-                    Some(next) => tokens.push(Token::Backslash(next)),
-                    None => return Err("Invalid escape sequence".into()),
-                }
+            '\\' => match iter.next() {
+                Some(next) => tokens.push(Token::Backslash(next)),
+                None => return Err("Invalid escape sequence".into()),
             },
             _ if c.is_alphanumeric() || c.is_whitespace() => {
                 let mut literal = String::new();
@@ -102,6 +101,9 @@ pub fn lex(expression: &str) -> Result<Vec<Token>, String> {
 }
 
 mod tests {
+    // No clue why this is needed, if the imports below
+    // are removed nothing will build properly.
+    #[allow(unused_imports)]
     use crate::lexer::{Token, lex};
 
     #[test]

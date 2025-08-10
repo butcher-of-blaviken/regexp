@@ -76,7 +76,6 @@ struct Parser {
     expression: String,
     tokens: Vec<Token>,
     current_token_idx: usize,
-    current_node: Option<ASTNode>,
 }
 
 impl Parser {
@@ -85,15 +84,13 @@ impl Parser {
             expression: expression.to_string(),
             tokens,
             current_token_idx: 0,
-            current_node: None,
         }
     }
 
     fn parse(&mut self) -> Result<(), String> {
-        self.current_node = Some(ASTNode::new(Some(Token::Program)));
         while self.current_token_idx < self.tokens.len() {
             match self.parse_next() {
-                Ok(_) => {},
+                Ok(_) => {}
                 Err(e) => return Err(e),
             }
         }
@@ -102,19 +99,11 @@ impl Parser {
 
     fn parse_next(&mut self) -> Result<(), String> {
         match self.tokens.get(self.current_token_idx) {
-            Some(token) => {
-                match token {
-                    Token::Literal(_) => {
-                        self.parse_literal(token.clone())
-                    },
-                    _ if token.is_unary_postfix() => {
-                        self.parse_unary_postfix(token.clone())
-                    },
-                    Token::LParen => {
-                        self.parse_parens()
-                    }
-                    _ => Err(format!("Unexpected token: {:?}", token)),
-                }
+            Some(token) => match token {
+                Token::Literal(_) => self.parse_literal(token.clone()),
+                _ if token.is_unary_postfix() => self.parse_unary_postfix(token.clone()),
+                Token::LParen => self.parse_parens(),
+                _ => Err(format!("Unexpected token: {:?}", token)),
             },
             None => Err("No tokens to parse".into()),
         }
@@ -127,12 +116,10 @@ impl Parser {
     fn parse_literal(&mut self, token: Token) -> Result<(), String> {
         match token {
             Token::Literal(_) => {
-                if let Some(ref mut node) = self.current_node {
-                    node.add_child(ASTNode::new(Some(token)));
-                }
+                // TODO
                 self.current_token_idx += 1;
                 Ok(())
-            },
+            }
             _ => Err(format!("Expected a literal, found: {:?}", token)),
         }
     }
@@ -142,89 +129,21 @@ impl Parser {
             _ if token.is_unary_postfix() => {
                 // unary postfix operators like Kleene star, plus, or question
                 // apply to the last node in the current AST.
-                match self.current_node {
-                    None => return Err("No current node to apply Kleene star to".into()),
-                    Some(ref mut node) => {
-                        let child = node.pop_child().ok_or("No child to apply Kleene star to")?;
-                        let mut unary_postfix_node = ASTNode::new(Some(token));
-                        unary_postfix_node.add_child(child);
-                        node.add_child(unary_postfix_node);
-                        self.current_token_idx += 1;
-                        Ok(())
-                    },
-                }
-            },
+                // TODO.
+                Ok(())
+            }
             _ => Err(format!("Expected unary postfix token, found: {:?}", token)),
         }
     }
 }
 
-struct ASTNode {
-    parent: Option<Weak<Rc<ASTNode>>>,
-    children: Vec<Box<ASTNode>>,
-    op: Option<Token>,
-}
-
-impl ASTNode {
-    fn new(op: Option<Token>) -> Self {
-        ASTNode {
-            parent: None,
-            children: Vec::new(),
-            op,
-        }
-    }
-
-    fn add_child(&mut self, child: ASTNode) {
-        self.children.push(Box::new(child));
-    }
-
-    fn pop_child(&mut self) -> Option<ASTNode> {
-        self.children.pop().map(|child| *child)
-    }
-}
-
-struct AST {
-    root: Option<ASTNode>,
-}
-
-impl AST {
-    fn new() -> Self {
-        AST {
-            root: None,
-        }
-    }
-
-    fn add_node(&mut self, node: ASTNode) {
-        match self.root {
-            Some(ref mut root) => root.add_child(node),
-            None => self.root = Some(node),
-        }
-    }
-
-    fn visualize(&self) -> String {
-        // Visualize the AST as a string with indentation
-        fn visualize_node(node: &ASTNode, depth: usize) -> String {
-            let indent = "  ".repeat(depth);
-            let mut result = String::new();
-            if let Some(ref op) = node.op {
-                result.push_str(&format!("{}{:?}\n", indent, op));
-            }
-            for child in &node.children {
-                result.push_str(&visualize_node(child, depth + 1));
-            }
-            result
-        }
-        if let Some(ref root) = self.root {
-            visualize_node(root, 0)
-        } else {
-            String::from("Empty AST")
-        }
-    }
-}
-
 mod tests {
+    // No clue why this is needed, if the imports below
+    // are removed nothing will build properly.
+    #[allow(unused_imports)]
+    use crate::lexer::lex;
+    #[allow(unused_imports)]
     use crate::parser::Parser;
-    use crate::lexer::{lex, Token};
 
     #[test]
     fn regex_parse_unary_postfix() {
@@ -232,42 +151,15 @@ mod tests {
         let kleene_star_tokens = lex(input).unwrap();
         let mut kleene_star_parser = Parser::new(input, kleene_star_tokens);
         assert!(kleene_star_parser.parse().is_ok());
-        if let Some(ast) = kleene_star_parser.current_node {
-            assert_eq!(ast.op, Some(Token::Program));
-            assert_eq!(ast.children.len(), 2);
-            if let Some(child) = ast.children.first() {
-                assert_eq!(child.op, Some(Token::KleeneStar));
-            }
-        } else {
-            panic!("Expected a non-empty AST");
-        }
 
         input = "a+b";
         let kleene_plus_tokens = lex(input).unwrap();
         let mut kleene_plus_parser = Parser::new(input, kleene_plus_tokens);
         assert!(kleene_plus_parser.parse().is_ok());
-        if let Some(ast2) = kleene_plus_parser.current_node {
-            assert_eq!(ast2.op, Some(Token::Program));
-            assert_eq!(ast2.children.len(), 2);
-            if let Some(child) = ast2.children.first() {
-                assert_eq!(child.op, Some(Token::KleenePlus));
-            }
-        } else {
-            panic!("Expected a non-empty AST");
-        }
 
         input = "a?b";
         let question_tokens = lex(input).unwrap();
-        let mut question_parser = Parser::new(input,question_tokens);
+        let mut question_parser = Parser::new(input, question_tokens);
         assert!(question_parser.parse().is_ok());
-        if let Some(ast3) = question_parser.current_node {
-            assert_eq!(ast3.op, Some(Token::Program));
-            assert_eq!(ast3.children.len(), 2);
-            if let Some(child) = ast3.children.first() {
-                assert_eq!(child.op, Some(Token::Question));
-            }
-        } else {
-            panic!("Expected a non-empty AST");
-        }
     }
 }
